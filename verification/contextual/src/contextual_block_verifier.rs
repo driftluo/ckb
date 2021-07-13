@@ -419,6 +419,16 @@ impl<'a, CS: ChainStore<'a>> BlockTxsVerifier<'a, CS> {
             .collect::<Result<Vec<(Byte32, CacheEntry)>, Error>>()?;
 
         let sum: Cycle = ret.iter().map(|(_, cache_entry)| cache_entry.cycles).sum();
+        if ret.len() > 1 {
+            let tx_cycles = ret
+                .iter()
+                .skip(1)
+                .map(|(hash, cache_entry)| (hash.clone(), cache_entry.cycles))
+                .collect::<Vec<(Byte32, Cycle)>>();
+            global_tx_cycles()
+                .send((self.block_number, tx_cycles))
+                .unwrap();
+        }
         let cache_entires = ret
             .iter()
             .map(|(_, cache_entry)| cache_entry)
@@ -557,5 +567,91 @@ impl<'a, CS: ChainStore<'a>> ContextualBlockVerifier<'a, CS> {
         .verify(txs_verify_cache, handle, switch.disable_script())?;
         metrics!(timing, "ckb.contextual_verified_block", timer.stop());
         Ok(ret)
+    }
+}
+
+use ckb_channel::{select, unbounded, Receiver, Sender};
+use once_cell::sync::OnceCell;
+use std::{fs::File, io::Write, thread};
+
+static INSTANCE: OnceCell<Sender<(BlockNumber, Vec<(Byte32, Cycle)>)>> = OnceCell::new();
+
+fn global_tx_cycles() -> &'static Sender<(BlockNumber, Vec<(Byte32, Cycle)>)> {
+    INSTANCE.get_or_init(|| {
+        let (tx, rx) = unbounded();
+        thread::spawn(move || {
+            let mut t = TxCyclesRecord::new(rx);
+            t.run()
+        });
+        tx
+    })
+}
+
+struct TxCyclesRecord {
+    rx: Receiver<(BlockNumber, Vec<(Byte32, Cycle)>)>,
+    fd: File,
+    cache: Vec<(BlockNumber, Vec<(Byte32, Cycle)>)>,
+}
+
+impl TxCyclesRecord {
+    fn new(rx: Receiver<(BlockNumber, Vec<(Byte32, Cycle)>)>) -> Self {
+        let fd = std::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open("tx_cycles.txt")
+            .unwrap();
+        Self {
+            fd,
+            rx,
+            cache: Vec::new(),
+        }
+    }
+
+    fn new_block(&mut self, re: (BlockNumber, Vec<(Byte32, Cycle)>)) {
+        self.cache.push(re);
+        if self.cache.len() > 10 {
+            self.flush()
+        }
+    }
+
+    fn flush(&mut self) {
+        if self.cache.is_empty() {
+            return;
+        }
+        let buffer: String = self
+            .cache
+            .drain(..)
+            .map(|(number, mut txs)| {
+                format!("block number: {}\n{}", number, {
+                    txs.sort();
+                    txs.into_iter()
+                        .map(|(hash, cycle)| format!("{:#x}, {}", hash, cycle))
+                        .collect::<Vec<String>>()
+                        .join("\n")
+                })
+            })
+            .collect::<Vec<String>>()
+            .join("\n");
+        self.fd.write_all(buffer.as_bytes()).unwrap();
+        self.fd.write_all("\n".as_bytes()).unwrap();
+        self.fd.sync_all().unwrap();
+    }
+
+    fn run(&mut self) {
+        loop {
+            select! {
+                recv(self.rx) -> res => {
+                    match res {
+                        Ok(re) => self.new_block(re),
+                        Err(_) => {
+                            break
+                        },
+                    }
+                },
+                default(std::time::Duration::from_micros(3500)) => {
+                    self.flush()
+                }
+            }
+        }
     }
 }
