@@ -12,6 +12,7 @@ use ckb_types::{
     packed::{self, Byte32, SendHeaders, SyncMessage},
     prelude::*,
 };
+use ckb_types::{core::TransactionView, packed::ProposalShortId};
 use std::time::Duration;
 
 pub struct BlockSyncFromOne;
@@ -297,6 +298,118 @@ impl Spec for BlockSyncRelayerCollaboration {
 
         let ret = wait_until(10, || rpc_client.get_tip_block_number() >= tip_number + 17);
         info!("{}", rpc_client.get_tip_block_number());
+        assert!(ret, "node0 should grow up");
+    }
+}
+
+pub struct BlockSyncRelayerCollaboration2;
+
+impl Spec for BlockSyncRelayerCollaboration2 {
+    crate::setup!(num_nodes: 2);
+
+    fn run(&self, nodes: &mut Vec<Node>) {
+        let node0 = &nodes[0];
+        let node1 = &nodes[1];
+        out_ibd_mode(nodes);
+
+        node0.connect(node1);
+
+        node0.mine_until_out_bootstrap_period();
+        waiting_for_sync(&[node0, node1]);
+
+        node0.disconnect(node1);
+
+        let tx_hash_0 = node1.generate_transaction();
+        let tx = node1.new_transaction(tx_hash_0.clone());
+        let tx_hash_1 = tx.hash();
+        node1.rpc_client().send_transaction(tx.data().into());
+        let tx_hash_0_0 = node0.generate_transaction();
+        assert_eq!(tx_hash_0, tx_hash_0_0);
+        // node0.rpc_client().send_transaction(tx_0.data().into());
+        node0.rpc_client().send_transaction(tx.data().into());
+
+        info!("Generated 2 tx should be included in the next block's proposals");
+        let proposed = node1.mine_with_blocking(|template| template.proposals.len() != 2);
+        let proposal_block = node1.get_tip_block();
+        let proposal_ids: Vec<_> = proposal_block.union_proposal_ids_iter().collect();
+        assert!(proposal_ids.contains(&ProposalShortId::from_tx_hash(&tx_hash_0)));
+        assert!(proposal_ids.contains(&ProposalShortId::from_tx_hash(&tx_hash_1)));
+
+        node1.mine_with_blocking(|template| template.number.value() != (proposed + 1));
+
+        info!("Generated 2 tx should be included in the next + 2 block");
+        node1.mine_with_blocking(|template| template.transactions.len() != 2);
+        let tip_block = node1.get_tip_block();
+        let tip_1 = node1
+            .rpc_client()
+            .get_block_by_number(tip_block.header().number() - 1)
+            .unwrap();
+        let commit_txs_hash: Vec<_> = tip_block
+            .transactions()
+            .iter()
+            .map(TransactionView::hash)
+            .collect();
+
+        assert!(commit_txs_hash.contains(&tx_hash_0));
+        assert!(commit_txs_hash.contains(&tx_hash_1));
+
+        // Generate some blocks from node1
+        let mut blocks: Vec<BlockView> = (1..2)
+            .map(|_| {
+                let block = node1.new_block(None, None, None);
+                node1.submit_block(&block);
+                block
+            })
+            .collect();
+
+        let mut net = Net::new(
+            self.name(),
+            node0.consensus(),
+            vec![SupportProtocols::Sync, SupportProtocols::RelayV3],
+        );
+        net.connect(node0);
+        let rpc_client = node0.rpc_client();
+        // let tip_number = rpc_client.get_tip_block_number();
+
+        net.send(
+            node0,
+            SupportProtocols::RelayV3,
+            build_compact_block(&proposal_block),
+        );
+
+        net.send(
+            node0,
+            SupportProtocols::RelayV3,
+            build_compact_block(&tip_1.clone().into()),
+        );
+        // sync_header(&net, node0, &proposal_block);
+
+        net.send(
+            node0,
+            SupportProtocols::RelayV3,
+            build_compact_block(&tip_block),
+        );
+
+        sync_header(&net, node0, &tip_block);
+
+        net.send(
+            node0,
+            SupportProtocols::RelayV3,
+            build_compact_block(&blocks[0]),
+        );
+
+        let ret = wait_until(10, || {
+            rpc_client.get_tip_block_number() == blocks[0].header().number()
+        });
+        info!(
+            "{}, {}, {}, {}, {}",
+            rpc_client.get_tip_block_number(),
+            blocks[0].header().number(),
+            proposal_block.header().number(),
+            tip_1.header.inner.number,
+            tip_block.header().number()
+        );
+
         assert!(ret, "node0 should grow up");
     }
 }
