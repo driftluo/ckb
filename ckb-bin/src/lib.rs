@@ -138,6 +138,16 @@ fn run_app_inner(
         cli::CMD_MIGRATE => subcommand::migrate(setup.migrate(matches)?),
         #[cfg(not(target_os = "windows"))]
         cli::CMD_DAEMON => subcommand::daemon(setup.daemon(matches)?),
+        "test" => test_rpc(
+            setup.run(matches)?,
+            version,
+            handle.clone(),
+            matches
+                .get_one::<String>("number")
+                .unwrap()
+                .parse()
+                .unwrap(),
+        ),
         _ => unreachable!(),
     };
 
@@ -152,6 +162,76 @@ fn run_app_inner(
     }
 
     ret
+}
+
+fn test_rpc(
+    args: ckb_app_config::RunArgs,
+    version: Version,
+    async_handle: ckb_async_runtime::Handle,
+    number: usize,
+) -> Result<(), ExitCode> {
+    use ckb_indexer::IndexerService;
+    use ckb_indexer_sync::{new_secondary_db, PoolService};
+
+    println!("number {}", number);
+    let rpc_threads_num = {
+        let system_parallelism: usize = std::thread::available_parallelism().unwrap().into();
+        let default_num = usize::max(system_parallelism, 1);
+        args.config.rpc.threads.unwrap_or(default_num)
+    };
+    info!("ckb version: {}", version);
+    let (mut rpc_handle, _rpc_stop_rx, _runtime) = new_global_runtime(Some(rpc_threads_num));
+    let launcher = ckb_launcher::Launcher::new(args, version, async_handle, rpc_handle.clone());
+
+    let block_assembler_config = launcher.sanitize_block_assembler_config()?;
+    let miner_enable = block_assembler_config.is_some();
+
+    launcher.check_indexer_config()?;
+
+    let (shared, mut pack) = launcher.build_shared(block_assembler_config)?;
+
+    let ckb_secondary_db = new_secondary_db(
+        &launcher.args.config.db,
+        &((&launcher.args.config.indexer).into()),
+    );
+    let pool_service = PoolService::new(
+        launcher.args.config.indexer.index_tx_pool,
+        shared.async_handle().clone(),
+    );
+
+    let mut indexer = IndexerService::new(
+        ckb_secondary_db.clone(),
+        pool_service.clone(),
+        &launcher.args.config.indexer,
+        shared.async_handle().clone(),
+    );
+    indexer.spawn_poll(shared.notify_controller().clone());
+
+    let indexer_handle = indexer.handle();
+
+    let mut res = Vec::with_capacity(number);
+
+    for _ in 0..number {
+        let search_key: ckb_jsonrpc_types::IndexerSearchKey = serde_json::from_str(r#"{"script": {"code_hash": "0x709f3fda12f561cfacf92273c57a98fede188a3f1a59b1f888d113f9cce08649","hash_type": "data",  "args": "0x30e87dd4b3d46bbd1521c3efb3405e0693669831"},"script_type": "lock","script_search_mode": "exact"}"#).unwrap();
+        res.push(
+            indexer_handle
+                .get_cells(
+                    search_key,
+                    ckb_jsonrpc_types::IndexerOrder::Asc,
+                    u32::from_str_radix("ffffff", 16).unwrap().into(),
+                    None,
+                )
+                .unwrap(),
+        )
+    }
+
+    println!(
+        "res len {}, content: {:?}",
+        res.len(),
+        serde_json::json!({"res":res})
+    );
+
+    Ok(())
 }
 
 #[cfg(not(target_os = "windows"))]

@@ -154,7 +154,44 @@ pub fn basic_app() -> Command {
         .subcommand(stats())
         .subcommand(reset_data())
         .subcommand(peer_id())
-        .subcommand(migrate());
+        .subcommand(migrate())
+        .subcommand(Command::new("test").arg(Arg::new("number").short('n').action(clap::ArgAction::Set)).arg(Arg::new(ARG_ASSUME_VALID_TARGET)
+        .long(ARG_ASSUME_VALID_TARGET)
+        .action(clap::ArgAction::Set)) .arg(
+            Arg::new(ARG_BA_ADVANCED)
+                .long(ARG_BA_ADVANCED)
+                .action(clap::ArgAction::SetTrue)
+                .help("Allow any block assembler code hash and args"),
+        ).arg(
+            Arg::new(ARG_SKIP_CHAIN_SPEC_CHECK)
+                .long(ARG_SKIP_CHAIN_SPEC_CHECK)
+                .action(clap::ArgAction::SetTrue)
+                .help("Skip checking the chain spec with the hash stored in the database"),
+        ).arg(
+            Arg::new(ARG_OVERWRITE_CHAIN_SPEC)
+                .long(ARG_OVERWRITE_CHAIN_SPEC)
+                .action(clap::ArgAction::SetTrue)
+                .help("Overwrite the chain spec in the database with the present configured chain spec")
+        ).arg(
+            Arg::new(ARG_INDEXER)
+                .long(ARG_INDEXER)
+                .action(clap::ArgAction::SetTrue)
+                .help("Start the built-in indexer service"),
+            )
+            .arg(
+                Arg::new(ARG_RICH_INDEXER)
+                .long(ARG_RICH_INDEXER)
+                .action(clap::ArgAction::SetTrue)
+                .help("Start the built-in rich-indexer service"),
+            ).arg(
+                Arg::new(ARG_DAEMON)
+                    .long(ARG_DAEMON)
+                    .action(clap::ArgAction::SetTrue)
+                    .help(
+                        "Starts ckb as a daemon, \
+                        which will run in the background and output logs to the specified log file",
+                    ),
+            ));
 
     #[cfg(not(target_os = "windows"))]
     let command = command.subcommand(daemon());

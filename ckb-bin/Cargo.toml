@@ -30,7 +30,9 @@ ckb-miner = { path = "../miner", version = "= 0.118.0-pre" }
 ckb-network = { path = "../network", version = "= 0.118.0-pre" }
 ckb-resource = { path = "../resource", version = "= 0.118.0-pre" }
 ctrlc = { version = "3.1", features = ["termination"] }
-ckb-instrument = { path = "../util/instrument", version = "= 0.118.0-pre", features = ["progress_bar"] }
+ckb-instrument = { path = "../util/instrument", version = "= 0.118.0-pre", features = [
+    "progress_bar",
+] }
 ckb-build-info = { path = "../util/build-info", version = "= 0.118.0-pre" }
 ckb-memory-tracker = { path = "../util/memory-tracker", version = "= 0.118.0-pre" }
 ckb-chain-iter = { path = "../util/chain-iter", version = "= 0.118.0-pre" }
@@ -38,6 +40,8 @@ ckb-verification-traits = { path = "../verification/traits", version = "= 0.118.
 ckb-async-runtime = { path = "../util/runtime", version = "= 0.118.0-pre" }
 ckb-migrate = { path = "../util/migrate", version = "= 0.118.0-pre" }
 ckb-launcher = { path = "../util/launcher", version = "= 0.118.0-pre" }
+ckb-indexer = { path = "../util/indexer", version = "= 0.118.0-pre" }
+ckb-indexer-sync = { path = "../util/indexer-sync", version = "= 0.118.0-pre" }
 base64 = "0.21.0"
 tempfile.workspace = true
 rayon = "1.0"
@@ -55,7 +59,13 @@ colored = "2.0"
 [features]
 deadlock_detection = ["ckb-util/deadlock_detection"]
 profiling = ["ckb-memory-tracker/profiling", "ckb-shared/stats"]
-with_sentry = ["sentry", "ckb-launcher/with_sentry", "ckb-network/with_sentry", "ckb-app-config/with_sentry", "ckb-logger-service/with_sentry"]
+with_sentry = [
+    "sentry",
+    "ckb-launcher/with_sentry",
+    "ckb-network/with_sentry",
+    "ckb-app-config/with_sentry",
+    "ckb-logger-service/with_sentry",
+]
 with_dns_seeding = ["ckb-network/with_dns_seeding"]
 portable = ["ckb-launcher/portable"]
 march-native = ["ckb-launcher/march-native"]

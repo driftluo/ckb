@@ -671,6 +671,8 @@ dependencies = [
  "ckb-chain-iter",
  "ckb-chain-spec",
  "ckb-channel",
+ "ckb-indexer",
+ "ckb-indexer-sync",
  "ckb-instrument",
  "ckb-jsonrpc-types",
  "ckb-launcher",
