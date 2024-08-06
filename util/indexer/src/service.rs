@@ -328,7 +328,7 @@ impl IndexerHandle {
         order: IndexerOrder,
         limit: Uint32,
         after_cursor: Option<JsonBytes>,
-    ) {
+    ) -> IndexerPagination<IndexerCell> {
         let (prefix, from_key, direction, skip) = build_query_options(
             &search_key,
             KeyPrefix::CellLockScript,
@@ -480,7 +480,7 @@ impl IndexerHandle {
             .take(limit.value() as usize)
             .collect::<Vec<_>>();
 
-        drop(cells)
+        IndexerPagination::new(cells, JsonBytes::from_vec(last_key))
     }
 
     /// Get transaction by specified params
