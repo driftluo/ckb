@@ -491,11 +491,7 @@ impl IndexerHandle {
                         lock: output.lock().into(),
                         type_: output.type_().to_opt().map(Into::into),
                     },
-                    output_data: if filter_options.with_data {
-                        Some(JsonBytes::from_vec(output_data.raw_data().to_vec()))
-                    } else {
-                        None
-                    },
+                    output_data: None,
                     out_point: out_point.into(),
                     block_number: block_number.into(),
                     tx_index: tx_index.into(),
