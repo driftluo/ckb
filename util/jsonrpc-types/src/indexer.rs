@@ -13,7 +13,7 @@ pub struct IndexerTip {
 }
 
 /// Live cell
-#[derive(Serialize, JsonSchema)]
+#[derive(Serialize, JsonSchema, Clone)]
 pub struct IndexerCell {
     /// the fields of an output cell
     pub output: CellOutput,

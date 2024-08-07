@@ -224,8 +224,8 @@ fn test_rpc(
                     .unwrap(),
             )
         } else {
-            for _ in 0..640000 {
-                res_cells.push(ckb_jsonrpc_types::IndexerCell {
+            let cells = vec![
+                ckb_jsonrpc_types::IndexerCell {
                     output: ckb_jsonrpc_types::CellOutput {
                         capacity: 1.into(),
                         lock: Default::default(),
@@ -235,8 +235,10 @@ fn test_rpc(
                     out_point: Default::default(),
                     block_number: 1.into(),
                     tx_index: 1.into(),
-                })
-            }
+                };
+                640000
+            ];
+            res_cells.push(cells);
             // res_cells.push(
             //     indexer_handle
             //         .get_cells_test(
