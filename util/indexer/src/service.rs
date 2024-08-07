@@ -488,7 +488,7 @@ impl IndexerHandle {
                 Some(IndexerCell {
                     output: ckb_jsonrpc_types::CellOutput {
                         capacity: 1.into(),
-                        lock: output.lock().into(),
+                        lock: Default::default(),
                         type_: None,
                     },
                     output_data: None,
