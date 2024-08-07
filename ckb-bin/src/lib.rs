@@ -238,8 +238,9 @@ fn test_rpc(
     }
 
     println!(
-        "res len {}, content: {}",
-        res.len(),
+        "res_cells len {}, res_capacity len {}, content: {}",
+        res_cells.len(),
+        res_capacity.len(),
         if get_capacity {
             serde_json::json!({"res": res_capacity})
         } else {
