@@ -224,16 +224,29 @@ fn test_rpc(
                     .unwrap(),
             )
         } else {
-            res_cells.push(
-                indexer_handle
-                    .get_cells_test(
-                        search_key,
-                        ckb_jsonrpc_types::IndexerOrder::Asc,
-                        u32::from_str_radix("ffffff", 16).unwrap().into(),
-                        None,
-                    )
-                    .unwrap(),
-            )
+            for _ in 0..640000 {
+                res_cells.push(ckb_jsonrpc_types::IndexerCell {
+                    output: ckb_jsonrpc_types::CellOutput {
+                        capacity: 1.into(),
+                        lock: Default::default(),
+                        type_: None,
+                    },
+                    output_data: None,
+                    out_point: Default::default(),
+                    block_number: 1.into(),
+                    tx_index: 1.into(),
+                })
+            }
+            // res_cells.push(
+            //     indexer_handle
+            //         .get_cells_test(
+            //             search_key,
+            //             ckb_jsonrpc_types::IndexerOrder::Asc,
+            //             u32::from_str_radix("ffffff", 16).unwrap().into(),
+            //             None,
+            //         )
+            //         .unwrap(),
+            // )
         }
     }
 
