@@ -492,7 +492,7 @@ impl IndexerHandle {
                         type_: None,
                     },
                     output_data: None,
-                    out_point: out_point.into(),
+                    out_point: Default::default(),
                     block_number: block_number.into(),
                     tx_index: tx_index.into(),
                 })
