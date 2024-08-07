@@ -164,7 +164,11 @@ impl IndexerHandle {
             ));
         }
 
-        let limit = limit.value() as usize;
+        let env_limit: usize = std::env::var("RPC_LIMIT")
+            .unwrap_or("128".to_string())
+            .parse()
+            .unwrap();
+        let limit = std::cmp::min(limit.value() as usize, env_limit);
         if limit == 0 {
             return Err(Error::invalid_params("limit should be greater than 0"));
         }
