@@ -487,9 +487,9 @@ impl IndexerHandle {
                 use ckb_types::prelude::Unpack;
                 Some(IndexerCell {
                     output: ckb_jsonrpc_types::CellOutput {
-                        capacity: Unpack::<u64>::unpack(&output.capacity()).into(),
+                        capacity: 1.into(),
                         lock: output.lock().into(),
-                        type_: output.type_().to_opt().map(Into::into),
+                        type_: None,
                     },
                     output_data: None,
                     out_point: out_point.into(),
