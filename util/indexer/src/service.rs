@@ -179,8 +179,6 @@ impl IndexerHandle {
         );
         let filter_options: FilterOptions = search_key.clone().try_into()?;
 
-        let snapshot = self.store.inner().snapshot();
-
         let mut last_key = Vec::new();
         let pool = self
             .pool
@@ -192,12 +190,16 @@ impl IndexerHandle {
             .parse()
             .unwrap();
 
+        let mut data_len = 0;
+        println!("env limit: {}", env_limit);
+
         loop {
             let step = std::cmp::min(limit, env_limit);
             if step == 0 {
                 break;
             }
             limit = limit.saturating_sub(step);
+            println!("step: {}", step);
 
             let (prefix, from_key, direction, skip) = build_query_options(
                 &search_key,
@@ -212,7 +214,7 @@ impl IndexerHandle {
             )?;
 
             let mode = IteratorMode::From(from_key.as_ref(), direction);
-
+            let snapshot = self.store.inner().snapshot();
             let iter = snapshot.iterator(mode).skip(skip);
 
             let old_len = cells.len();
@@ -330,6 +332,7 @@ impl IndexerHandle {
                         Some(IndexerCell {
                             output: output.into(),
                             output_data: if filter_options.with_data {
+                                data_len += output_data.len();
                                 Some(output_data.into())
                             } else {
                                 None
@@ -347,6 +350,8 @@ impl IndexerHandle {
                 break;
             }
         }
+        println!("data size: {}m", data_len / 1024 / 1024);
+        println!("cells len: {}", cells.len());
 
         Ok(IndexerPagination::new(cells, JsonBytes::from_vec(last_key)))
     }
