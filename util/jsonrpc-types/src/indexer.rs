@@ -1,5 +1,3 @@
-use std::clone;
-
 use crate::{BlockNumber, Capacity, CellOutput, JsonBytes, OutPoint, Script, Uint32, Uint64};
 use ckb_types::H256;
 use schemars::JsonSchema;

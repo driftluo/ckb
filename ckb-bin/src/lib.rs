@@ -226,7 +226,7 @@ fn test_rpc(
         } else {
             res_cells.push(
                 indexer_handle
-                    .get_cells(
+                    .get_cells_test(
                         search_key,
                         ckb_jsonrpc_types::IndexerOrder::Asc,
                         u32::from_str_radix("ffffff", 16).unwrap().into(),
