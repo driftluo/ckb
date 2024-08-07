@@ -209,17 +209,28 @@ fn test_rpc(
 
     let indexer_handle = indexer.handle();
 
+    let mut res = Vec::with_capacity(number);
+
     for _ in 0..number {
         let search_key: ckb_jsonrpc_types::IndexerSearchKey = serde_json::from_str(r#"{"script": {"code_hash": "0x709f3fda12f561cfacf92273c57a98fede188a3f1a59b1f888d113f9cce08649","hash_type": "data",  "args": "0x30e87dd4b3d46bbd1521c3efb3405e0693669831"},"script_type": "lock","script_search_mode": "exact"}"#).unwrap();
 
-        let cells = indexer_handle.get_cells_with_snapshot(
-            search_key,
-            ckb_jsonrpc_types::IndexerOrder::Asc,
-            u32::from_str_radix("ffffff", 16).unwrap().into(),
-            None,
-        );
-        drop(cells)
+        res.push(
+            indexer_handle
+                .get_cells(
+                    search_key,
+                    ckb_jsonrpc_types::IndexerOrder::Asc,
+                    u32::from_str_radix("ffffff", 16).unwrap().into(),
+                    None,
+                )
+                .unwrap(),
+        )
     }
+
+    println!(
+        "res len {}, content: {}",
+        res.len(),
+        serde_json::json!({"res":res})
+    );
 
     Ok(())
 }

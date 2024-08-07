@@ -164,18 +164,10 @@ impl IndexerHandle {
             ));
         }
 
-        let limit = limit.value() as usize;
+        let mut limit = limit.value() as usize;
         if limit == 0 {
             return Err(Error::invalid_params("limit should be greater than 0"));
         }
-
-        let (prefix, from_key, direction, skip) = build_query_options(
-            &search_key,
-            KeyPrefix::CellLockScript,
-            KeyPrefix::CellTypeScript,
-            order,
-            after_cursor,
-        )?;
 
         let filter_script_type = match search_key.script_type {
             IndexerScriptType::Lock => IndexerScriptType::Type,
@@ -185,139 +177,169 @@ impl IndexerHandle {
             search_key.script_search_mode,
             Some(IndexerSearchMode::Exact)
         );
-        let filter_options: FilterOptions = search_key.try_into()?;
-        let mode = IteratorMode::From(from_key.as_ref(), direction);
+        let filter_options: FilterOptions = search_key.clone().try_into()?;
+
         let snapshot = self.store.inner().snapshot();
-        let iter = snapshot.iterator(mode).skip(skip);
 
         let mut last_key = Vec::new();
         let pool = self
             .pool
             .as_ref()
             .map(|pool| pool.read().expect("acquire lock"));
-        let cells = iter
-            .take_while(|(key, _value)| key.starts_with(&prefix))
-            .filter_map(|(key, value)| {
-                if script_search_exact {
-                    // Exact match mode, check key length is equal to full script len + BlockNumber (8) + TxIndex (4) + OutputIndex (4)
-                    if key.len() != prefix.len() + 16 {
-                        return None;
-                    }
-                }
-                let tx_hash = packed::Byte32::from_slice(&value).expect("stored tx hash");
-                let index =
-                    u32::from_be_bytes(key[key.len() - 4..].try_into().expect("stored index"));
-                let out_point = packed::OutPoint::new(tx_hash, index);
-                if pool
-                    .as_ref()
-                    .map(|pool| pool.is_consumed_by_pool_tx(&out_point))
-                    .unwrap_or_default()
-                {
-                    return None;
-                }
-                let (block_number, tx_index, output, output_data) = Value::parse_cell_value(
-                    &snapshot
-                        .get(Key::OutPoint(&out_point).into_vec())
-                        .expect("get OutPoint should be OK")
-                        .expect("stored OutPoint"),
-                );
+        let mut cells = Vec::new();
+        let env_limit: usize = std::env::var("RPC_LIMIT")
+            .unwrap_or("128".to_string())
+            .parse()
+            .unwrap();
 
-                if let Some(prefix) = filter_options.script_prefix.as_ref() {
-                    match filter_script_type {
-                        IndexerScriptType::Lock => {
-                            if !extract_raw_data(&output.lock())
-                                .as_slice()
-                                .starts_with(prefix)
-                            {
+        loop {
+            let step = std::cmp::min(limit, env_limit);
+            if step == 0 {
+                break;
+            }
+            limit = limit.saturating_sub(step);
+
+            let (prefix, from_key, direction, skip) = build_query_options(
+                &search_key,
+                KeyPrefix::CellLockScript,
+                KeyPrefix::CellTypeScript,
+                order,
+                if last_key.is_empty() {
+                    after_cursor.clone()
+                } else {
+                    Some(JsonBytes::from_vec(last_key.clone()))
+                },
+            )?;
+
+            let mode = IteratorMode::From(from_key.as_ref(), direction);
+
+            let iter = snapshot.iterator(mode).skip(skip);
+
+            cells.extend(
+                iter.take_while(|(key, _value)| key.starts_with(&prefix))
+                    .filter_map(|(key, value)| {
+                        if script_search_exact {
+                            // Exact match mode, check key length is equal to full script len + BlockNumber (8) + TxIndex (4) + OutputIndex (4)
+                            if key.len() != prefix.len() + 16 {
                                 return None;
                             }
                         }
-                        IndexerScriptType::Type => {
-                            if output.type_().is_none()
-                                || !extract_raw_data(&output.type_().to_opt().unwrap())
-                                    .as_slice()
-                                    .starts_with(prefix)
-                            {
+                        let tx_hash = packed::Byte32::from_slice(&value).expect("stored tx hash");
+                        let index = u32::from_be_bytes(
+                            key[key.len() - 4..].try_into().expect("stored index"),
+                        );
+                        let out_point = packed::OutPoint::new(tx_hash, index);
+                        if pool
+                            .as_ref()
+                            .map(|pool| pool.is_consumed_by_pool_tx(&out_point))
+                            .unwrap_or_default()
+                        {
+                            return None;
+                        }
+                        let (block_number, tx_index, output, output_data) = Value::parse_cell_value(
+                            &snapshot
+                                .get(Key::OutPoint(&out_point).into_vec())
+                                .expect("get OutPoint should be OK")
+                                .expect("stored OutPoint"),
+                        );
+
+                        if let Some(prefix) = filter_options.script_prefix.as_ref() {
+                            match filter_script_type {
+                                IndexerScriptType::Lock => {
+                                    if !extract_raw_data(&output.lock())
+                                        .as_slice()
+                                        .starts_with(prefix)
+                                    {
+                                        return None;
+                                    }
+                                }
+                                IndexerScriptType::Type => {
+                                    if output.type_().is_none()
+                                        || !extract_raw_data(&output.type_().to_opt().unwrap())
+                                            .as_slice()
+                                            .starts_with(prefix)
+                                    {
+                                        return None;
+                                    }
+                                }
+                            }
+                        }
+
+                        if let Some([r0, r1]) = filter_options.script_len_range {
+                            match filter_script_type {
+                                IndexerScriptType::Lock => {
+                                    let script_len = extract_raw_data(&output.lock()).len();
+                                    if script_len < r0 || script_len >= r1 {
+                                        return None;
+                                    }
+                                }
+                                IndexerScriptType::Type => {
+                                    let script_len = output
+                                        .type_()
+                                        .to_opt()
+                                        .map(|script| extract_raw_data(&script).len())
+                                        .unwrap_or_default();
+                                    if script_len < r0 || script_len >= r1 {
+                                        return None;
+                                    }
+                                }
+                            }
+                        }
+
+                        if let Some((data, mode)) = &filter_options.output_data {
+                            match mode {
+                                IndexerSearchMode::Prefix => {
+                                    if !output_data.raw_data().starts_with(data) {
+                                        return None;
+                                    }
+                                }
+                                IndexerSearchMode::Exact => {
+                                    if output_data.raw_data() != data {
+                                        return None;
+                                    }
+                                }
+                                IndexerSearchMode::Partial => {
+                                    memmem::find(&output_data.raw_data(), data)?;
+                                }
+                            }
+                        }
+
+                        if let Some([r0, r1]) = filter_options.output_data_len_range {
+                            if output_data.len() < r0 || output_data.len() >= r1 {
                                 return None;
                             }
                         }
-                    }
-                }
 
-                if let Some([r0, r1]) = filter_options.script_len_range {
-                    match filter_script_type {
-                        IndexerScriptType::Lock => {
-                            let script_len = extract_raw_data(&output.lock()).len();
-                            if script_len < r0 || script_len >= r1 {
+                        if let Some([r0, r1]) = filter_options.output_capacity_range {
+                            let capacity: core::Capacity = output.capacity().unpack();
+                            if capacity < r0 || capacity >= r1 {
                                 return None;
                             }
                         }
-                        IndexerScriptType::Type => {
-                            let script_len = output
-                                .type_()
-                                .to_opt()
-                                .map(|script| extract_raw_data(&script).len())
-                                .unwrap_or_default();
-                            if script_len < r0 || script_len >= r1 {
+
+                        if let Some([r0, r1]) = filter_options.block_range {
+                            if block_number < r0 || block_number >= r1 {
                                 return None;
                             }
                         }
-                    }
-                }
 
-                if let Some((data, mode)) = &filter_options.output_data {
-                    match mode {
-                        IndexerSearchMode::Prefix => {
-                            if !output_data.raw_data().starts_with(data) {
-                                return None;
-                            }
-                        }
-                        IndexerSearchMode::Exact => {
-                            if output_data.raw_data() != data {
-                                return None;
-                            }
-                        }
-                        IndexerSearchMode::Partial => {
-                            memmem::find(&output_data.raw_data(), data)?;
-                        }
-                    }
-                }
+                        last_key = key.to_vec();
 
-                if let Some([r0, r1]) = filter_options.output_data_len_range {
-                    if output_data.len() < r0 || output_data.len() >= r1 {
-                        return None;
-                    }
-                }
-
-                if let Some([r0, r1]) = filter_options.output_capacity_range {
-                    let capacity: core::Capacity = output.capacity().unpack();
-                    if capacity < r0 || capacity >= r1 {
-                        return None;
-                    }
-                }
-
-                if let Some([r0, r1]) = filter_options.block_range {
-                    if block_number < r0 || block_number >= r1 {
-                        return None;
-                    }
-                }
-
-                last_key = key.to_vec();
-
-                Some(IndexerCell {
-                    output: output.into(),
-                    output_data: if filter_options.with_data {
-                        Some(output_data.into())
-                    } else {
-                        None
-                    },
-                    out_point: out_point.into(),
-                    block_number: block_number.into(),
-                    tx_index: tx_index.into(),
-                })
-            })
-            .take(limit)
-            .collect::<Vec<_>>();
+                        Some(IndexerCell {
+                            output: output.into(),
+                            output_data: if filter_options.with_data {
+                                Some(output_data.into())
+                            } else {
+                                None
+                            },
+                            out_point: out_point.into(),
+                            block_number: block_number.into(),
+                            tx_index: tx_index.into(),
+                        })
+                    })
+                    .take(step),
+            );
+        }
 
         Ok(IndexerPagination::new(cells, JsonBytes::from_vec(last_key)))
     }

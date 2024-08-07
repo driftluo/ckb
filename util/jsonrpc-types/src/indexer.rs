@@ -1,3 +1,5 @@
+use std::clone;
+
 use crate::{BlockNumber, Capacity, CellOutput, JsonBytes, OutPoint, Script, Uint32, Uint64};
 use ckb_types::H256;
 use schemars::JsonSchema;
@@ -47,7 +49,7 @@ impl<T> IndexerPagination<T> {
 }
 
 /// SearchKey represent indexer support params
-#[derive(Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema, Clone)]
 pub struct IndexerSearchKey {
     /// Script
     pub script: Script,
@@ -103,7 +105,7 @@ impl Default for IndexerSearchMode {
 /// | ["0x0", "0x2"]           |          [0, 2)              |
 /// | ["0x0", "0x174876e801"]  |          [0, 100000000001)   |
 ///
-#[derive(Deserialize, Default, JsonSchema)]
+#[derive(Deserialize, Default, JsonSchema, Clone, Copy)]
 #[serde(transparent)]
 pub struct IndexerRange {
     inner: [Uint64; 2],
@@ -132,7 +134,7 @@ impl IndexerRange {
 }
 
 /// IndexerSearchKeyFilter represent indexer params `filter`
-#[derive(Deserialize, Default, JsonSchema)]
+#[derive(Deserialize, Default, JsonSchema, Clone)]
 pub struct IndexerSearchKeyFilter {
     /// if search script type is lock, filter cells by type script prefix, and vice versa
     pub script: Option<Script>,
@@ -151,7 +153,7 @@ pub struct IndexerSearchKeyFilter {
 }
 
 /// ScriptType `Lock` | `Type`
-#[derive(Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum IndexerScriptType {
     /// Lock
@@ -161,7 +163,7 @@ pub enum IndexerScriptType {
 }
 
 /// Order Desc | Asc
-#[derive(Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum IndexerOrder {
     /// Descending order
