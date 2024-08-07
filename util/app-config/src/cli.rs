@@ -191,7 +191,7 @@ pub fn basic_app() -> Command {
                         "Starts ckb as a daemon, \
                         which will run in the background and output logs to the specified log file",
                     ),
-            ).arg(Arg::new("get-capacity").action(clap::ArgAction::SetTrue)));
+            ).arg(Arg::new("get-capacity").long("get-capacity").action(clap::ArgAction::SetTrue)));
 
     #[cfg(not(target_os = "windows"))]
     let command = command.subcommand(daemon());
