@@ -215,6 +215,8 @@ impl IndexerHandle {
 
             let iter = snapshot.iterator(mode).skip(skip);
 
+            let old_len = cells.len();
+
             cells.extend(
                 iter.take_while(|(key, _value)| key.starts_with(&prefix))
                     .filter_map(|(key, value)| {
@@ -339,6 +341,11 @@ impl IndexerHandle {
                     })
                     .take(step),
             );
+            let new_len = cells.len();
+
+            if new_len - old_len < step {
+                break;
+            }
         }
 
         Ok(IndexerPagination::new(cells, JsonBytes::from_vec(last_key)))
