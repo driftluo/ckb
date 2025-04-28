@@ -542,6 +542,8 @@ pub trait NetRpc {
     /// ```
     #[rpc(name = "ping_peers")]
     fn ping_peers(&self) -> Result<()>;
+    #[rpc(name = "hole_punching")]
+    fn hole_punching(&self, peer_id: String) -> Result<()>;
 }
 
 #[derive(Clone)]
@@ -793,6 +795,13 @@ impl NetRpc for NetRpcImpl {
 
     fn ping_peers(&self) -> Result<()> {
         self.network_controller.ping_peers();
+        Ok(())
+    }
+
+    fn hole_punching(&self, peer_id: String) -> Result<()> {
+        if let Ok(id) = peer_id.parse() {
+            self.network_controller.try_hole_punching_peer(id)
+        }
         Ok(())
     }
 }

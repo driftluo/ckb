@@ -806,6 +806,7 @@ pub struct NetworkService {
     p2p_service: Service<EventHandler, SecioKeyPair>,
     network_state: Arc<NetworkState>,
     ping_controller: Option<Sender<()>>,
+    tcp_hole_punching_controller: Option<Sender<PeerId>>,
     // Background services
     bg_services: Vec<Pin<Box<dyn Future<Output = ()> + 'static + Send>>>,
     version: String,
@@ -915,21 +916,23 @@ impl NetworkService {
             protocol_metas.push(disconnect_message_meta);
         }
 
+        let tcp_hole_punching_controller: Option<Sender<PeerId>> = None;
         // HolePunching protocol
         #[cfg(not(target_family = "wasm"))]
-        if config
+        let tcp_hole_punching_controller = if config
             .support_protocols
             .contains(&SupportProtocol::HolePunching)
         {
             let hole_punching_state = Arc::clone(&network_state);
-            let hole_punching_meta =
-                SupportProtocols::HolePunching.build_meta_with_service_handle(move || {
-                    ProtocolHandle::Callback(Box::new(
-                        crate::protocols::hole_punching::HolePunching::new(hole_punching_state),
-                    ))
-                });
+            let (meta, tx) =
+                crate::protocols::hole_punching::HolePunching::new(hole_punching_state);
+            let hole_punching_meta = SupportProtocols::HolePunching
+                .build_meta_with_service_handle(move || ProtocolHandle::Callback(Box::new(meta)));
             protocol_metas.push(hole_punching_meta);
-        }
+            Some(tx)
+        } else {
+            None
+        };
 
         let mut service_builder = ServiceBuilder::default();
         let yamux_config = YamuxConfig {
@@ -1111,6 +1114,7 @@ impl NetworkService {
             p2p_service,
             network_state,
             ping_controller,
+            tcp_hole_punching_controller,
             bg_services,
             version: identify_announce.1,
         }
@@ -1161,6 +1165,7 @@ impl NetworkService {
             mut p2p_service,
             network_state,
             ping_controller,
+            tcp_hole_punching_controller,
             bg_services,
             version,
         } = self;
@@ -1280,6 +1285,7 @@ impl NetworkService {
             network_state,
             p2p_control,
             ping_controller,
+            tcp_hole_punching_controller,
         })
     }
 }
@@ -1291,6 +1297,7 @@ pub struct NetworkController {
     network_state: Arc<NetworkState>,
     p2p_control: ServiceControl,
     ping_controller: Option<Sender<()>>,
+    tcp_hole_punching_controller: Option<Sender<PeerId>>,
 }
 
 impl NetworkController {
@@ -1499,6 +1506,13 @@ impl NetworkController {
     pub fn ping_peers(&self) {
         if let Some(mut ping_controller) = self.ping_controller.clone() {
             let _ignore = ping_controller.try_send(());
+        }
+    }
+
+    /// Try hole punching with peer
+    pub fn try_hole_punching_peer(&self, peer_id: PeerId) {
+        if let Some(mut tcp_hole_punching_controller) = self.tcp_hole_punching_controller.clone() {
+            let _ignore = tcp_hole_punching_controller.try_send(peer_id);
         }
     }
 }

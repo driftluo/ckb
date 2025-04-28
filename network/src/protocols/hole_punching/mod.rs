@@ -3,6 +3,7 @@ use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
 use ckb_logger::{debug, error, trace, warn};
 use ckb_systemtime::unix_time_as_millis;
 use ckb_types::{packed, prelude::*};
+use futures::StreamExt;
 use p2p::{
     async_trait, bytes,
     context::{ProtocolContext, ProtocolContextMutRef},
@@ -44,6 +45,7 @@ pub(crate) struct HolePunching {
     pending_delivered: HashMap<PeerId, PendingDeliveredInfo>,
     rate_limiter: RateLimiter<(PeerIndex, u32)>,
     forward_rate_limiter: RateLimiter<(PeerId, PeerId, u32)>,
+    recv: futures::channel::mpsc::Receiver<PeerId>,
 }
 
 #[async_trait]
@@ -242,45 +244,99 @@ impl ServiceProtocol for HolePunching {
             }
         }
     }
+
+    async fn poll(&mut self, context: &mut ProtocolContext) -> Option<()> {
+        if let Some(to_peer_id) = self.recv.next().await {
+            debug!("start hole punching to {}", to_peer_id);
+            let from_peer_id = self.network_state.local_peer_id();
+            let listen_addrs = {
+                let public_addr = self.network_state.public_addrs(ADDRS_COUNT_LIMIT);
+                if public_addr.len() < ADDRS_COUNT_LIMIT {
+                    let observed_addrs = self
+                        .network_state
+                        .observed_addrs(ADDRS_COUNT_LIMIT - public_addr.len());
+                    let iter = public_addr
+                        .iter()
+                        .chain(observed_addrs.iter())
+                        .map(Multiaddr::to_vec)
+                        .map(|v| packed::Address::new_builder().bytes(v.pack()).build());
+                    packed::AddressVec::new_builder().extend(iter).build()
+                } else {
+                    let iter = public_addr
+                        .iter()
+                        .map(Multiaddr::to_vec)
+                        .map(|v| packed::Address::new_builder().bytes(v.pack()).build());
+                    packed::AddressVec::new_builder().extend(iter).build()
+                }
+            };
+            let conn_req = {
+                let content =
+                    component::init_request(from_peer_id, &to_peer_id, listen_addrs.clone());
+                packed::HolePunchingMessage::new_builder()
+                    .set(content)
+                    .build()
+            };
+            let proto_id = SupportProtocols::HolePunching.protocol_id();
+
+            let _ignore = context
+                .filter_broadcast(TargetSession::All, proto_id, conn_req.as_bytes())
+                .await;
+            let now = unix_time_as_millis();
+            self.inflight_requests.insert(to_peer_id, now);
+
+            Some(())
+        } else {
+            None
+        }
+    }
 }
 
 impl HolePunching {
-    pub(crate) fn new(network_state: Arc<NetworkState>) -> Self {
+    pub(crate) fn new(
+        network_state: Arc<NetworkState>,
+    ) -> (Self, futures::channel::mpsc::Sender<PeerId>) {
         // setup a rate limiter keyed by peer and message type that lets through 30 requests per second
         // current max rps is 10 (CHECK_TOKEN), 30 is a flexible hard cap with buffer
         let quota = governor::Quota::per_second(std::num::NonZeroU32::new(30).unwrap());
         let rate_limiter = RateLimiter::hashmap(quota);
+        let (tx, rx) = futures::channel::mpsc::channel(12);
 
         // In the request forwarding process, the same group of from/to should not be received by the same
         // node more than 1 times within one second.
         let quota = governor::Quota::per_second(std::num::NonZeroU32::new(1).unwrap());
         let forward_rate_limiter = RateLimiter::hashmap(quota);
 
-        Self {
-            #[cfg(not(target_os = "linux"))]
-            bind_addr: None,
-            #[cfg(target_os = "linux")]
-            bind_addr: {
-                let mut bind_addr = None;
-                if network_state.config.reuse_port_on_linux {
-                    for multi_addr in &network_state.config.listen_addresses {
-                        if let crate::network::TransportType::Tcp =
-                            crate::network::find_type(multi_addr)
-                        {
-                            if let Some(addr) = p2p::utils::multiaddr_to_socketaddr(multi_addr) {
-                                bind_addr = Some(addr);
-                                break;
+        (
+            Self {
+                #[cfg(not(target_os = "linux"))]
+                bind_addr: None,
+                #[cfg(target_os = "linux")]
+                bind_addr: {
+                    let mut bind_addr = None;
+                    if network_state.config.reuse_port_on_linux {
+                        for multi_addr in &network_state.config.listen_addresses {
+                            if let crate::network::TransportType::Tcp =
+                                crate::network::find_type(multi_addr)
+                            {
+                                if let Some(addr) = p2p::utils::multiaddr_to_socketaddr(multi_addr)
+                                {
+                                    bind_addr = Some(addr);
+                                    break;
+                                }
                             }
                         }
                     }
-                }
-                bind_addr
+
+                    bind_addr
+                },
+                network_state,
+                pending_delivered: HashMap::new(),
+                inflight_requests: HashMap::new(),
+                rate_limiter,
+                forward_rate_limiter,
+                recv: rx,
             },
-            network_state,
-            pending_delivered: HashMap::new(),
-            inflight_requests: HashMap::new(),
-            rate_limiter,
-            forward_rate_limiter,
-        }
+            tx,
+        )
     }
 }
